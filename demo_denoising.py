@@ -30,7 +30,7 @@ def timeSince(since, percent):
     return '%s (remain %s)' % (asMinutes(s), asMinutes(rs))
 
 
-usm = False
+usm = True
 
 def train(file_path, dropout_rate, sigma=25, is_realnoisy=False):
     print(file_path)
@@ -50,7 +50,7 @@ def train(file_path, dropout_rate, sigma=25, is_realnoisy=False):
     os.makedirs(model_path, exist_ok=True)
     noisy_input = util.add_gaussian_noise(gt, model_path, sigma)
     #print("input:", noisy)
-    model = network.Punet.build_denoising_unet(noisy_input, 1 - dropout_rate, mask_rate=mask_rate, is_realnoisy, pyramid=pyramid)
+    model = network.Punet.build_denoising_unet(noisy_input, 1 - dropout_rate, mask_rate=mask_rate, is_realnoisy=is_realnoisy, pyramid=pyramid)
 
     loss = model['training_error']
     summay = model['summary']
@@ -105,7 +105,7 @@ def train(file_path, dropout_rate, sigma=25, is_realnoisy=False):
                 blur_img = cv2.GaussianBlur(o_avg_BGR, (0, 0), 5)
                 alpha = 1.3
                 usm_avg_BGR = cv2.addWeighted(o_avg_BGR, alpha, blur_img, 1-alpha, 0)
-                o_avg_usm = np.clip(cv2.cvtColor(o_avg_BGR, cv2.COLOR_RGB2BGR), 0, 255)
+                o_avg_usm = np.clip(cv2.cvtColor(usm_avg_BGR, cv2.COLOR_RGB2BGR), 0, 255)
                 cv2.imwrite(model_path + 'Self2Self-' + str(step + 1) + '-usm_1.3.png', o_avg_usm)
                 
             if (step + 1) % 25000 == 0:  
@@ -132,7 +132,7 @@ if __name__ == '__main__':
 #                 train(path + file_name, 0.3, sigma)
 
 
-    path = './testsets/MyBSD_noise50/'
+    path = './testsets/my/'
     file_list = os.listdir(path)
     sigma = -1
     for file_name in file_list:
