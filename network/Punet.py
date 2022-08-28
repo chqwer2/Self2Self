@@ -76,6 +76,7 @@ def Pconv_lr(name, x, fmaps, mask_in):
         return tf.nn.leaky_relu(x_out, alpha=0.1), mask_out
 
 
+
 def partial_conv_unet(x, mask, channel=3, width=256, height=256, p=0.7, **_kwargs):
     x.set_shape([None, channel, height, width])
     mask.set_shape([None, channel, height, width])
@@ -133,6 +134,102 @@ def partial_conv_unet(x, mask, channel=3, width=256, height=256, p=0.7, **_kwarg
     return n
 
 
+
+def partial_conv_unet_(x, mask, channel=3, width=256, height=256, p=0.7, pyramid = False, **_kwargs):
+    x.set_shape([None, channel, height, width])
+    mask.set_shape([None, channel, height, width])
+    skips = [x]
+
+    n = x
+    mask_ = mask
+    
+    n, mask = Pconv_lr('enc_conv0', n, 48, mask_in=mask)
+    n, mask = Pconv_lr('enc_conv1', n, 48, mask_in=mask)
+    if pyramid:
+        [x1, mask_] = Pmaxpool2d(x, mask_in=mask_)
+            
+    [n, mask], Pmaxpool2d(n, mask_in=mask)
+    
+    skips.append(n)
+    if pyramid:
+        n = concat(n, x1)
+        mask = concat(mask, mask_)
+    
+    n, mask = Pconv_lr('enc_conv2', n, 48, mask_in=mask)
+    if pyramid:
+        [x1, mask_] = Pmaxpool2d(x1, mask_in=mask_)
+    
+    [n, mask], Pmaxpool2d(n, mask_in=mask)
+    
+    skips.append(n)
+    if pyramid:
+        n = concat(n, x1)
+        mask = concat(mask, mask_)
+
+    n, mask = Pconv_lr('enc_conv3', n, 48, mask_in=mask)
+    if pyramid:
+        [x1, mask_] = Pmaxpool2d(x1, mask_in=mask_)
+    
+    [n, mask], Pmaxpool2d(n, mask_in=mask)
+    
+    skips.append(n)
+    if pyramid:
+        n = concat(n, x1)
+        mask = concat(mask, mask_)
+
+    n, mask = Pconv_lr('enc_conv4', n, 48, mask_in=mask)
+    if pyramid:
+        [x1, mask_] = Pmaxpool2d(x1, mask_in=mask_)
+    
+    [n, mask], Pmaxpool2d(n, mask_in=mask)
+    
+    skips.append(n)
+    if pyramid:
+        n = concat(n, x1)
+        mask = concat(mask, mask_)
+
+    n, mask = Pconv_lr('enc_conv5', n, 48, mask_in=mask)
+    if pyramid:
+        [x1, mask_] = Pmaxpool2d(x1, mask_in=mask_)
+    
+    [n, mask], Pmaxpool2d(n, mask_in=mask)
+    
+    if pyramid:
+        n = concat(n, x1)
+        mask = concat(mask, mask_)
+        
+    n, mask = Pconv_lr('enc_conv6', n, 48, mask_in=mask)
+
+    # -----------------------------------------------
+    n = upscale2d(n)
+    n = concat(n, skips.pop())
+    n = conv_lr('dec_conv5', n, 96, p=p)
+    n = conv_lr('dec_conv5b', n, 96, p=p)
+
+    n = upscale2d(n)
+    n = concat(n, skips.pop())
+    n = conv_lr('dec_conv4', n, 96, p=p)
+    n = conv_lr('dec_conv4b', n, 96, p=p)
+
+    n = upscale2d(n)
+    n = concat(n, skips.pop())
+    n = conv_lr('dec_conv3', n, 96, p=p)
+    n = conv_lr('dec_conv3b', n, 96, p=p)
+
+    n = upscale2d(n)
+    n = concat(n, skips.pop())
+    n = conv_lr('dec_conv2', n, 96, p=p)
+    n = conv_lr('dec_conv2b', n, 96, p=p)
+
+    n = upscale2d(n)
+    n = concat(n, skips.pop())
+    n = conv_lr('dec_conv1a', n, 64, p=p)
+    n = conv_lr('dec_conv1b', n, 32, p=p)
+    n = conv('dec_conv1', n, channel, p=p)
+
+    return n
+
+
 def concat(x, y):
     bs1, c1, h1, w1 = x.shape.as_list()
     bs2, c2, h2, w2 = y.shape.as_list()
@@ -141,20 +238,25 @@ def concat(x, y):
     return tf.transpose(tf.concat([x, y], axis=3), [0, 3, 1, 2])
 
 
-def build_denoising_unet(noisy, p=0.7, is_realnoisy=False):
-    _, h, w, c = np.shape(noisy)
+def build_denoising_unet(img, p=0.7, mask_rate, is_realnoisy=False, pyramid=False):
+    
+    noisy = tf.placeholder(tf.float32, shape=img.shape)
+    _, h, w, c = np.shape(img)
     noisy_tensor = tf.identity(noisy)
     is_flip_lr = tf.placeholder(tf.int16)
     is_flip_ud = tf.placeholder(tf.int16)
+    
+    
+    
     noisy_tensor = data_arg(noisy_tensor, is_flip_lr, is_flip_ud)
     response = tf.transpose(noisy_tensor, [0, 3, 1, 2])
     mask_tensor = tf.ones_like(response)
-    mask_tensor = tf.nn.dropout(mask_tensor, 0.7) * 0.7
+    mask_tensor = tf.nn.dropout(mask_tensor, mask_rate) * mask_rate
     response = tf.multiply(mask_tensor, response)
     slice_avg = tf.get_variable('slice_avg', shape=[_, h, w, c], initializer=tf.initializers.zeros())
     if is_realnoisy:
         response = tf.squeeze(tf.random_poisson(25 * response, [1]) / 25, 0)
-    response = partial_conv_unet(response, mask_tensor, channel=c, width=w, height=h, p=p)
+    response = partial_conv_unet(response, mask_tensor, channel=c, width=w, height=h, p=p, pyramid=pyramid)
     response = tf.transpose(response, [0, 2, 3, 1])
     mask_tensor = tf.transpose(mask_tensor, [0, 2, 3, 1])
     data_loss = mask_loss(response, noisy_tensor, 1. - mask_tensor)
@@ -175,6 +277,7 @@ def build_denoising_unet(noisy, p=0.7, is_realnoisy=False):
         'our_image': our_image,
         'is_flip_lr': is_flip_lr,
         'is_flip_ud': is_flip_ud,
+        'noisy': noisy,
         'avg_op': avg_op,
         'slice_avg': slice_avg,
     }
